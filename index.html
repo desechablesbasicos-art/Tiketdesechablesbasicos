@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POS Cloud - Desechables Básicos</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; padding: 20px; }
+        .no-print-zone { max-width: 450px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        
+        .tabs { display: flex; margin-bottom: 20px; background: #eee; border-radius: 8px; padding: 5px; }
+        .tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; font-weight: bold; border-radius: 6px; }
+        .tab.active { background: white; color: #007bff; }
+
+        label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9em; }
+        input, select { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; }
+        
+        button { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn-add { background: #ffc107; color: #000; }
+        .btn-sell { background: #28a745; color: white; font-size: 1.1em; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        
+        .history-item { border-bottom: 1px solid #eee; padding: 12px 0; display: flex; justify-content: space-between; align-items: center; }
+        .btn-reprint { background: #3b82f6; color: white; padding: 6px 12px; font-size: 0.8em; width: auto; }
+
+        /* ESTILO DEL TICKET */
+        #ticket-printable {
+            width: 280px; 
+            background: white;
+            padding: 15px;
+            font-family: 'Courier New', Courier, monospace; 
+            font-size: 13px;
+            line-height: 1.2;
+            color: black;
+            border: 1px solid #eee;
+            margin: 20px auto;
+            display: none; 
+            white-space: pre-wrap;
+        }
+
+        @media print {
+            @page { margin: 0; }
+            body * { visibility: hidden; }
+            #ticket-printable { 
+                visibility: visible; 
+                display: block !important; 
+                position: absolute; left: 0; top: 0; width: 100%; border: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="no-print-zone">
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('pos')">VENTA</div>
+        <div class="tab" onclick="switchTab('inv')">STOCK</div>
+        <div class="tab" onclick="switchTab('his')">HISTORIAL</div>
+    </div>
+
+    <div id="section-pos">
+        <label>Producto:</label>
+        <select id="sel-prod" onchange="mostrarDisp()"></select>
+        <div id="disp-actual" style="font-size:0.8em; color:#666; margin-bottom:10px;"></div>
+        
+        <input type="number" id="inp-qty" value="1" min="1">
+        <button class="btn-add" onclick="addToCart()">🛒 Añadir al Carrito</button>
+
+        <div id="items-list" style="margin-top:20px; border-top: 1px solid #eee; padding-top: 10px;"></div>
+        
+        <label>Descuento $:</label>
+        <input type="number" id="inp-disc" value="0.00" step="0.01" oninput="updateTotals()">
+        
+        <div id="total-display" style="text-align:right; font-size:1.5em; font-weight:bold; color:#28a745; margin:15px 0;">Total: $0.00</div>
+
+        <button class="btn-sell" onclick="processSale()">✅ COBRAR E IMPRIMIR</button>
+    </div>
+
+    <div id="section-inv" style="display:none">
+        <label>Editar o Crear:</label>
+        <select id="sel-edit" onchange="loadEditData()">
+            <option value="">-- NUEVO PRODUCTO --</option>
+        </select>
+        <input type="text" id="edit-name" placeholder="Nombre del Producto">
+        <input type="number" id="edit-price" step="0.01" placeholder="Precio de Venta">
+        <input type="number" id="edit-stock" placeholder="Cantidad a Sumar al Stock">
+        <button class="btn-primary" onclick="saveProduct()">💾 Guardar en la Nube</button>
+    </div>
+
+    <div id="section-his" style="display:none">
+        <div id="history-container"></div>
+    </div>
+</div>
+
+<div id="ticket-printable"></div>
+
+<script type="module">
+    // --- CONFIGURACIÓN DE FIREBASE ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, collection, doc, addDoc, onSnapshot, updateDoc, increment, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyDJkqMNCPBQdkjQHBKyXyNLpBGIAlZ-4I4",
+        authDomain: "desechables-basicos.firebaseapp.com",
+        projectId: "desechables-basicos",
+        storageBucket: "desechables-basicos.firebasestorage.app",
+        messagingSenderId: "51919662981",
+        appId: "1:51919662981:web:4601365cc9fd0216911eec",
+        measurementId: "G-88S2Q8PZZW"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // --- VARIABLES DE ESTADO ---
+    let cart = [];
+    let products = [];
+    let history = [];
+
+    // --- SINCRONIZACIÓN EN TIEMPO REAL ---
+    onSnapshot(collection(db, "productos"), (snapshot) => {
+        products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        refreshSelectors();
+    });
+
+    onSnapshot(query(collection(db, "ventas"), orderBy("timestamp", "desc"), limit(20)), (snapshot) => {
+        history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        if(document.getElementById('section-his').style.display === 'block') renderHistory();
+    });
+
+    // --- FUNCIONES GLOBALES (Expuestas a los botones HTML) ---
+    window.switchTab = (tab) => {
+        document.getElementById('section-pos').style.display = tab === 'pos' ? 'block' : 'none';
+        document.getElementById('section-inv').style.display = tab === 'inv' ? 'block' : 'none';
+        document.getElementById('section-his').style.display = tab === 'his' ? 'block' : 'none';
+        document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.getAttribute('onclick').includes(tab)));
+        if(tab === 'his') renderHistory();
+    };
+
+    function refreshSelectors() {
+        const options = products.map((p, i) => `<option value="${i}">${p.name} (${p.stock})</option>`).join('');
+        document.getElementById('sel-prod').innerHTML = '<option value="">-- Seleccionar --</option>' + options;
+        document.getElementById('sel-edit').innerHTML = '<option value="">-- NUEVO PRODUCTO --</option>' + options;
+    }
+
+    window.mostrarDisp = () => {
+        const idx = document.getElementById('sel-prod').value;
+        const info = document.getElementById('disp-actual');
+        if(idx !== "" && products[idx]) info.innerHTML = `Disponibles: ${products[idx].stock}`; else info.innerText = "";
+    };
+
+    window.addToCart = () => {
+        const idx = document.getElementById('sel-prod').value;
+        const qty = parseInt(document.getElementById('inp-qty').value);
+        if(idx === "" || qty <= 0) return;
+        if(qty > products[idx].stock) return alert("Stock insuficiente");
+        
+        cart.push({ 
+            dbId: products[idx].id, 
+            name: products[idx].name, 
+            price: products[idx].price, 
+            qty, 
+            total: products[idx].price * qty 
+        });
+        updateTotals();
+    };
+
+    window.updateTotals = () => {
+        const sub = cart.reduce((a, b) => a + b.total, 0);
+        const disc = parseFloat(document.getElementById('inp-disc').value) || 0;
+        document.getElementById('items-list').innerHTML = cart.map(it => `
+            <div style="display:flex; justify-content:space-between; font-size:0.9em; margin-bottom:5px;">
+                <span>${it.qty}x ${it.name}</span>
+                <span>$${it.total.toFixed(2)}</span>
+            </div>`).join('');
+        document.getElementById('total-display').innerText = "Total: $" + (sub - disc).toFixed(2);
+        buildTicket(sub, disc, new Date().toLocaleString(), cart);
+    };
+
+    function buildTicket(sub, disc, date, itemsArray) {
+        const line = "--------------------------------";
+        let itemsHtml = "";
+        itemsArray.forEach(it => {
+            let n = it.name.substring(0, 18).padEnd(19, ' ');
+            let p = ("$" + it.total.toFixed(2)).padStart(9, ' ');
+            itemsHtml += `${it.qty.toString().padEnd(2, ' ')} ${n}${p}\n`;
+        });
+        const total = sub - disc;
+        const ticketTxt = `      DESECHABLES BASICOS\n        Pol. 23 Local 4\n        Santa Ana Norte\n${line}\nFECHA: ${date}\n${line}\nCANT PRODUCTO            TOTAL\n${line}\n${itemsHtml}${line}\nSUBTOTAL:           ${("$"+sub.toFixed(2)).padStart(12, ' ')}\nDESC:               ${("-$"+disc.toFixed(2)).padStart(12, ' ')}\nTOTAL:              ${("$"+total.toFixed(2)).padStart(12, ' ')}\n${line}\n     GRACIAS POR SU COMPRA\n${line}`;
+        document.getElementById('ticket-printable').innerText = ticketTxt;
+    }
+
+    window.processSale = async () => {
+        if(cart.length === 0) return;
+        const sub = cart.reduce((a, b) => a + b.total, 0);
+        const disc = parseFloat(document.getElementById('inp-disc').value) || 0;
+        const date = new Date().toLocaleString();
+
+        try {
+            // Guardar Venta
+            await addDoc(collection(db, "ventas"), {
+                date,
+                timestamp: Date.now(),
+                sub,
+                disc,
+                total: (sub - disc),
+                items: cart
+            });
+
+            // Actualizar Stock
+            for (const item of cart) {
+                const prodRef = doc(db, "productos", item.dbId);
+                await updateDoc(prodRef, { stock: increment(-item.qty) });
+            }
+
+            // Mostrar ticket para captura
+            const ticket = document.getElementById('ticket-printable');
+            ticket.style.display = 'block';
+
+            // Capturar imagen
+            const canvas = await html2canvas(ticket);
+            const link = document.createElement('a');
+            link.download = `Venta_${Date.now()}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
+
+            // Imprimir
+            window.print();
+
+            // Reset
+            alert("Venta guardada exitosamente");
+            cart = [];
+            document.getElementById('inp-disc').value = "0.00";
+            window.updateTotals();
+            ticket.style.display = 'none';
+
+        } catch (e) {
+            console.error(e);
+            alert("Error al conectar con la nube. Revisa tu conexión.");
+        }
+    };
+
+    window.saveProduct = async () => {
+        const idx = document.getElementById('sel-edit').value;
+        const n = document.getElementById('edit-name').value;
+        const p = parseFloat(document.getElementById('edit-price').value);
+        const s = parseInt(document.getElementById('edit-stock').value) || 0;
+
+        if(!n || isNaN(p)) return alert("Nombre y precio son obligatorios");
+
+        try {
+            if(idx === "") {
+                await addDoc(collection(db, "productos"), { name: n, price: p, stock: s });
+            } else {
+                const prodRef = doc(db, "productos", products[idx].id);
+                await updateDoc(prodRef, { name: n, price: p, stock: increment(s) });
+            }
+            alert("Producto guardado en la nube");
+            document.getElementById('edit-name').value = "";
+            document.getElementById('edit-price').value = "";
+            document.getElementById('edit-stock').value = "";
+        } catch (e) {
+            alert("Error al guardar producto");
+        }
+    };
+
+    window.loadEditData = () => {
+        const idx = document.getElementById('sel-edit').value;
+        if(idx !== "") { 
+            document.getElementById('edit-name').value = products[idx].name; 
+            document.getElementById('edit-price').value = products[idx].price; 
+            document.getElementById('edit-stock').value = 0; // Se pone en 0 para sumar
+        }
+    };
+
+    function renderHistory() {
+        const container = document.getElementById('history-container');
+        if(history.length === 0) {
+            container.innerHTML = "<p style='text-align:center; color:#999;'>No hay ventas registradas.</p>";
+            return;
+        }
+        container.innerHTML = history.map((h, index) => `
+            <div class="history-item">
+                <div><small>${h.date}</small><br><b>$${h.total.toFixed(2)}</b></div>
+                <button class="btn-reprint" onclick="reimprimirTicket(${index})">🖨️ Ticket</button>
+            </div>
+        `).join('');
+    }
+
+    window.reimprimirTicket = (index) => {
+        const h = history[index];
+        buildTicket(h.sub, h.disc, h.date, h.items);
+        document.getElementById('ticket-printable').style.display = 'block';
+        setTimeout(() => { 
+            window.print(); 
+            document.getElementById('ticket-printable').style.display = 'none'; 
+        }, 300);
+    };
+
+</script>
+</body>
+</html>
