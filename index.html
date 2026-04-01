@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POS Cloud - Desechables Básicos</title>
+    <title>POS - Desechables Básicos</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
         .no-print-zone { max-width: 450px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .tabs { display: flex; margin-bottom: 20px; background: #eee; border-radius: 8px; padding: 5px; }
-        .tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; font-weight: bold; border-radius: 6px; font-size: 0.8em; }
+        .tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; font-weight: bold; border-radius: 6px; font-size: 0.9em; }
         .tab.active { background: white; color: #007bff; }
         label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9em; }
         input, select { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; }
@@ -17,23 +17,31 @@
         .btn-add { background: #ffc107; color: #000; }
         .btn-sell { background: #28a745; color: white; font-size: 1.1em; }
         .btn-primary { background: #007bff; color: white; }
-        .btn-danger { background: #dc3545; color: white; margin-top: 5px; }
+        .btn-danger { background: #dc3545; color: white; margin-top: 10px; }
         .history-item { border-bottom: 1px solid #eee; padding: 12px 0; display: flex; justify-content: space-between; align-items: center; }
         .btn-reprint { background: #3b82f6; color: white; padding: 6px 12px; font-size: 0.8em; width: auto; }
 
-        /* TICKET OPTIMIZADO PARA PT-210 (58mm) */
+        /* TICKET OPTIMIZADO PARA 58mm (PT-210) */
         #ticket-printable {
-            width: 250px; background: white; padding: 10px;
-            font-family: 'Courier New', Courier, monospace; font-size: 12px;
-            line-height: 1.1; color: black; border: 1px solid #eee;
-            margin: 0 auto; display: none; white-space: pre-wrap;
+            width: 250px; 
+            background: white;
+            padding: 10px;
+            font-family: 'Courier New', Courier, monospace; 
+            font-size: 12px;
+            line-height: 1.1;
+            color: black;
+            border: 1px solid #eee;
+            margin: 0 auto;
+            display: none; 
+            white-space: pre-wrap;
         }
 
         @media print {
-            @page { margin: 0; size: auto; }
+            @page { margin: 0; }
             body * { visibility: hidden; }
             #ticket-printable { 
-                visibility: visible; display: block !important; 
+                visibility: visible; 
+                display: block !important; 
                 position: absolute; left: 0; top: 0; width: 100%; border: none;
             }
         }
@@ -53,7 +61,7 @@
         <select id="sel-prod" onchange="window.mostrarDisp()"></select>
         <div id="disp-actual" style="font-size:0.8em; color:#666; margin-bottom:10px;"></div>
         <input type="number" id="inp-qty" value="1" min="1">
-        <button class="btn-add" onclick="window.addToCart()">🛒 Añadir</button>
+        <button class="btn-add" onclick="window.addToCart()">🛒 Añadir al Carrito</button>
         <div id="items-list" style="margin-top:20px; border-top: 1px solid #eee; padding-top: 10px;"></div>
         <label>Descuento $:</label>
         <input type="number" id="inp-disc" value="0.00" step="0.01" oninput="window.updateTotals()">
@@ -69,7 +77,7 @@
         <input type="text" id="edit-name" placeholder="Nombre">
         <input type="number" id="edit-price" step="0.01" placeholder="Precio">
         <input type="number" id="edit-stock" placeholder="Cantidad a Sumar">
-        <button class="btn-primary" onclick="window.saveProduct()">💾 Guardar</button>
+        <button class="btn-primary" onclick="window.saveProduct()">💾 Guardar / Rellenar</button>
         <button id="btn-delete" class="btn-danger" style="display:none" onclick="window.deleteProduct()">🗑️ Borrar Producto</button>
     </div>
 
@@ -101,16 +109,14 @@
     let products = [];
     let history = [];
 
-    // Sincronización Productos
+    // Sincronización Realtime
     onSnapshot(collection(db, "productos"), (snapshot) => {
         products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         refreshSelectors();
     });
 
-    // Sincronización Historial (Corregido para que siempre cargue)
-    onSnapshot(collection(db, "ventas"), (snapshot) => {
-        history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-                          .sort((a, b) => b.timestamp - a.timestamp);
+    onSnapshot(query(collection(db, "ventas"), orderBy("timestamp", "desc"), limit(25)), (snapshot) => {
+        history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         if(document.getElementById('section-his').style.display === 'block') renderHistory();
     });
 
@@ -124,13 +130,14 @@
 
     window.mostrarDisp = () => {
         const idx = document.getElementById('sel-prod').value;
-        document.getElementById('disp-actual').innerText = (idx !== "" && products[idx]) ? `Disponibles: ${products[idx].stock}` : "";
+        const info = document.getElementById('disp-actual');
+        if(idx !== "" && products[idx]) info.innerHTML = `Disponibles: ${products[idx].stock}`; else info.innerText = "";
     };
 
     window.addToCart = () => {
         const idx = document.getElementById('sel-prod').value;
         const qty = parseInt(document.getElementById('inp-qty').value);
-        if(idx === "" || qty <= 0 || qty > products[idx].stock) return alert("Error en cantidad");
+        if(idx === "" || qty <= 0 || qty > products[idx].stock) return alert("Error en stock");
         cart.push({ dbId: products[idx].id, name: products[idx].name, price: products[idx].price, qty, total: products[idx].price * qty });
         window.updateTotals();
     };
@@ -138,7 +145,7 @@
     window.updateTotals = () => {
         const sub = cart.reduce((a, b) => a + b.total, 0);
         const disc = parseFloat(document.getElementById('inp-disc').value) || 0;
-        document.getElementById('items-list').innerHTML = cart.map(it => `<div style="display:flex; justify-content:space-between; font-size:0.9em"><span>${it.qty}x ${it.name}</span><span>$${it.total.toFixed(2)}</span></div>`).join('');
+        document.getElementById('items-list').innerHTML = cart.map(it => `<div style="display:flex; justify-content:space-between; font-size:0.9em; margin-bottom:5px;"><span>${it.qty}x ${it.name}</span><span>$${it.total.toFixed(2)}</span></div>`).join('');
         document.getElementById('total-display').innerText = "Total: $" + (sub - disc).toFixed(2);
         buildTicket(sub, disc, new Date().toLocaleString(), cart);
     };
@@ -154,25 +161,21 @@
             for (const item of cart) {
                 await updateDoc(doc(db, "productos", item.dbId), { stock: increment(-item.qty) });
             }
-            
             const ticket = document.getElementById('ticket-printable');
             ticket.style.display = 'block';
             
-            // GUARDAR COMO IMAGEN (PNG)
+            // Guardar imagen PNG
             const canvas = await html2canvas(ticket);
             const link = document.createElement('a');
-            link.download = `Ticket_${Date.now()}.png`;
+            link.download = `Venta_${Date.now()}.png`;
             link.href = canvas.toDataURL("image/png");
             link.click();
 
-            // IMPRIMIR (En celular, esto abre el menú de compartir/imprimir)
             window.print();
-            
             cart = [];
             window.updateTotals();
             ticket.style.display = 'none';
-            alert("Venta guardada y ticket generado");
-        } catch (e) { alert("Error de red"); }
+        } catch (e) { alert("Error de conexión"); }
     };
 
     window.saveProduct = async () => {
@@ -184,47 +187,34 @@
         try {
             if(idx === "") await addDoc(collection(db, "productos"), { name: n, price: p, stock: s });
             else await updateDoc(doc(db, "productos", products[idx].id), { name: n, price: p, stock: increment(s) });
-            alert("Stock actualizado");
-            limpiarInv();
-        } catch(e) { alert("Error"); }
+            alert("Listo");
+            resetInv();
+        } catch(e) { alert("Error al guardar"); }
     };
 
     window.deleteProduct = async () => {
         const idx = document.getElementById('sel-edit').value;
-        if(idx !== "" && confirm("¿Borrar este producto para siempre?")) {
+        if(idx !== "" && confirm("¿Borrar producto?")) {
             await deleteDoc(doc(db, "productos", products[idx].id));
-            alert("Eliminado");
-            limpiarInv();
+            resetInv();
         }
     };
 
     window.loadEditData = () => {
         const idx = document.getElementById('sel-edit').value;
-        const btnDel = document.getElementById('btn-delete');
         if(idx !== "") {
             document.getElementById('edit-name').value = products[idx].name;
             document.getElementById('edit-price').value = products[idx].price;
-            document.getElementById('edit-stock').value = 0;
-            btnDel.style.display = 'block';
-        } else {
-            limpiarInv();
-        }
+            document.getElementById('btn-delete').style.display = 'block';
+        } else resetInv();
     };
 
-    function limpiarInv() {
+    function resetInv() {
         document.getElementById('edit-name').value = "";
         document.getElementById('edit-price').value = "";
         document.getElementById('edit-stock').value = "";
         document.getElementById('btn-delete').style.display = 'none';
-        document.getElementById('sel-edit').value = "";
     }
-
-    window.reimprimirTicket = (index) => {
-        const h = history[index];
-        buildTicket(h.sub, h.disc, h.date, h.items);
-        document.getElementById('ticket-printable').style.display = 'block';
-        setTimeout(() => { window.print(); document.getElementById('ticket-printable').style.display = 'none'; }, 500);
-    };
 
     function refreshSelectors() {
         const options = products.map((p, i) => `<option value="${i}">${p.name} (${p.stock})</option>`).join('');
@@ -236,18 +226,25 @@
         const line = "--------------------------";
         let itemsHtml = "";
         itemsArray.forEach(it => {
-            itemsHtml += `${it.qty} ${it.name.substring(0,15)} $${it.total.toFixed(2)}\n`;
+            itemsHtml += `${it.qty} ${it.name.substring(0,14).padEnd(15)} $${it.total.toFixed(2).padStart(6)}\n`;
         });
         document.getElementById('ticket-printable').innerText = `    DESECHABLES BASICOS\n      Pol. 23 Local 4\n${line}\nFECHA: ${date}\n${line}\n${itemsHtml}${line}\nTOTAL: $${(sub-disc).toFixed(2)}\n${line}\n  GRACIAS POR SU COMPRA`;
     }
 
     function renderHistory() {
-        document.getElementById('history-container').innerHTML = history.slice(0,30).map((h, i) => `
+        document.getElementById('history-container').innerHTML = history.map((h, i) => `
             <div class="history-item">
                 <div><small>${h.date}</small><br><b>$${h.total.toFixed(2)}</b></div>
                 <button class="btn-reprint" onclick="window.reimprimirTicket(${i})">🖨️</button>
             </div>`).join('');
     }
+
+    window.reimprimirTicket = (index) => {
+        const h = history[index];
+        buildTicket(h.sub, h.disc, h.date, h.items);
+        document.getElementById('ticket-printable').style.display = 'block';
+        setTimeout(() => { window.print(); document.getElementById('ticket-printable').style.display = 'none'; }, 500);
+    };
 </script>
 </body>
 </html>
