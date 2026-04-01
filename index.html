@@ -6,10 +6,10 @@
     <title>POS Cloud - Desechables Básicos</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; padding: 20px; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
         .no-print-zone { max-width: 450px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .tabs { display: flex; margin-bottom: 20px; background: #eee; border-radius: 8px; padding: 5px; }
-        .tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; font-weight: bold; border-radius: 6px; }
+        .tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; font-weight: bold; border-radius: 6px; font-size: 0.8em; }
         .tab.active { background: white; color: #007bff; }
         label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9em; }
         input, select { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; }
@@ -17,18 +17,20 @@
         .btn-add { background: #ffc107; color: #000; }
         .btn-sell { background: #28a745; color: white; font-size: 1.1em; }
         .btn-primary { background: #007bff; color: white; }
+        .btn-danger { background: #dc3545; color: white; margin-top: 5px; }
         .history-item { border-bottom: 1px solid #eee; padding: 12px 0; display: flex; justify-content: space-between; align-items: center; }
         .btn-reprint { background: #3b82f6; color: white; padding: 6px 12px; font-size: 0.8em; width: auto; }
 
+        /* TICKET OPTIMIZADO PARA PT-210 (58mm) */
         #ticket-printable {
-            width: 280px; background: white; padding: 15px;
-            font-family: 'Courier New', Courier, monospace; font-size: 13px;
-            line-height: 1.2; color: black; border: 1px solid #eee;
-            margin: 20px auto; display: none; white-space: pre-wrap;
+            width: 250px; background: white; padding: 10px;
+            font-family: 'Courier New', Courier, monospace; font-size: 12px;
+            line-height: 1.1; color: black; border: 1px solid #eee;
+            margin: 0 auto; display: none; white-space: pre-wrap;
         }
 
         @media print {
-            @page { margin: 0; }
+            @page { margin: 0; size: auto; }
             body * { visibility: hidden; }
             #ticket-printable { 
                 visibility: visible; display: block !important; 
@@ -51,7 +53,7 @@
         <select id="sel-prod" onchange="window.mostrarDisp()"></select>
         <div id="disp-actual" style="font-size:0.8em; color:#666; margin-bottom:10px;"></div>
         <input type="number" id="inp-qty" value="1" min="1">
-        <button class="btn-add" onclick="window.addToCart()">🛒 Añadir al Carrito</button>
+        <button class="btn-add" onclick="window.addToCart()">🛒 Añadir</button>
         <div id="items-list" style="margin-top:20px; border-top: 1px solid #eee; padding-top: 10px;"></div>
         <label>Descuento $:</label>
         <input type="number" id="inp-disc" value="0.00" step="0.01" oninput="window.updateTotals()">
@@ -67,7 +69,8 @@
         <input type="text" id="edit-name" placeholder="Nombre">
         <input type="number" id="edit-price" step="0.01" placeholder="Precio">
         <input type="number" id="edit-stock" placeholder="Cantidad a Sumar">
-        <button class="btn-primary" onclick="window.saveProduct()">💾 Guardar en Firebase</button>
+        <button class="btn-primary" onclick="window.saveProduct()">💾 Guardar</button>
+        <button id="btn-delete" class="btn-danger" style="display:none" onclick="window.deleteProduct()">🗑️ Borrar Producto</button>
     </div>
 
     <div id="section-his" style="display:none">
@@ -79,9 +82,8 @@
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, doc, addDoc, onSnapshot, updateDoc, increment, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, collection, doc, addDoc, onSnapshot, updateDoc, deleteDoc, increment, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-    // Configuración desde tu captura
     const firebaseConfig = {
         apiKey: "AIzaSyDJkqMNCPBQdkjQHBKyXyNLpBGIAlZ-4I4",
         authDomain: "desechables-basicos.firebaseapp.com",
@@ -99,23 +101,25 @@
     let products = [];
     let history = [];
 
-    // Sincronización en tiempo real
+    // Sincronización Productos
     onSnapshot(collection(db, "productos"), (snapshot) => {
         products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         refreshSelectors();
     });
 
-    onSnapshot(query(collection(db, "ventas"), orderBy("timestamp", "desc"), limit(20)), (snapshot) => {
-        history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    // Sincronización Historial (Corregido para que siempre cargue)
+    onSnapshot(collection(db, "ventas"), (snapshot) => {
+        history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                          .sort((a, b) => b.timestamp - a.timestamp);
         if(document.getElementById('section-his').style.display === 'block') renderHistory();
     });
 
-    // Funciones Window para HTML
     window.switchTab = (tab) => {
         document.getElementById('section-pos').style.display = tab === 'pos' ? 'block' : 'none';
         document.getElementById('section-inv').style.display = tab === 'inv' ? 'block' : 'none';
         document.getElementById('section-his').style.display = tab === 'his' ? 'block' : 'none';
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.getAttribute('onclick').includes(tab)));
+        if(tab === 'his') renderHistory();
     };
 
     window.mostrarDisp = () => {
@@ -126,7 +130,7 @@
     window.addToCart = () => {
         const idx = document.getElementById('sel-prod').value;
         const qty = parseInt(document.getElementById('inp-qty').value);
-        if(idx === "" || qty <= 0 || qty > products[idx].stock) return alert("Stock insuficiente o datos inválidos");
+        if(idx === "" || qty <= 0 || qty > products[idx].stock) return alert("Error en cantidad");
         cart.push({ dbId: products[idx].id, name: products[idx].name, price: products[idx].price, qty, total: products[idx].price * qty });
         window.updateTotals();
     };
@@ -134,13 +138,13 @@
     window.updateTotals = () => {
         const sub = cart.reduce((a, b) => a + b.total, 0);
         const disc = parseFloat(document.getElementById('inp-disc').value) || 0;
-        document.getElementById('items-list').innerHTML = cart.map(it => `<div style="display:flex; justify-content:space-between"><span>${it.qty}x ${it.name}</span><span>$${it.total.toFixed(2)}</span></div>`).join('');
+        document.getElementById('items-list').innerHTML = cart.map(it => `<div style="display:flex; justify-content:space-between; font-size:0.9em"><span>${it.qty}x ${it.name}</span><span>$${it.total.toFixed(2)}</span></div>`).join('');
         document.getElementById('total-display').innerText = "Total: $" + (sub - disc).toFixed(2);
         buildTicket(sub, disc, new Date().toLocaleString(), cart);
     };
 
     window.processSale = async () => {
-        if(cart.length === 0) return alert("Carrito vacío");
+        if(cart.length === 0) return;
         const sub = cart.reduce((a, b) => a + b.total, 0);
         const disc = parseFloat(document.getElementById('inp-disc').value) || 0;
         const date = new Date().toLocaleString();
@@ -154,21 +158,21 @@
             const ticket = document.getElementById('ticket-printable');
             ticket.style.display = 'block';
             
-            // Intento de captura de imagen
-            try {
-                const canvas = await html2canvas(ticket);
-                const link = document.createElement('a');
-                link.download = `Venta_${Date.now()}.png`;
-                link.href = canvas.toURL();
-                link.click();
-            } catch(e) {}
+            // GUARDAR COMO IMAGEN (PNG)
+            const canvas = await html2canvas(ticket);
+            const link = document.createElement('a');
+            link.download = `Ticket_${Date.now()}.png`;
+            link.href = canvas.toDataURL("image/png");
+            link.click();
 
+            // IMPRIMIR (En celular, esto abre el menú de compartir/imprimir)
             window.print();
-            alert("Venta guardada e impresa");
+            
             cart = [];
             window.updateTotals();
             ticket.style.display = 'none';
-        } catch (e) { alert("Error de conexión"); }
+            alert("Venta guardada y ticket generado");
+        } catch (e) { alert("Error de red"); }
     };
 
     window.saveProduct = async () => {
@@ -176,21 +180,44 @@
         const n = document.getElementById('edit-name').value;
         const p = parseFloat(document.getElementById('edit-price').value);
         const s = parseInt(document.getElementById('edit-stock').value) || 0;
+        if(!n) return;
         try {
             if(idx === "") await addDoc(collection(db, "productos"), { name: n, price: p, stock: s });
             else await updateDoc(doc(db, "productos", products[idx].id), { name: n, price: p, stock: increment(s) });
-            alert("Inventario sincronizado");
-        } catch(e) { alert("Error al guardar"); }
+            alert("Stock actualizado");
+            limpiarInv();
+        } catch(e) { alert("Error"); }
+    };
+
+    window.deleteProduct = async () => {
+        const idx = document.getElementById('sel-edit').value;
+        if(idx !== "" && confirm("¿Borrar este producto para siempre?")) {
+            await deleteDoc(doc(db, "productos", products[idx].id));
+            alert("Eliminado");
+            limpiarInv();
+        }
     };
 
     window.loadEditData = () => {
         const idx = document.getElementById('sel-edit').value;
+        const btnDel = document.getElementById('btn-delete');
         if(idx !== "") {
             document.getElementById('edit-name').value = products[idx].name;
             document.getElementById('edit-price').value = products[idx].price;
             document.getElementById('edit-stock').value = 0;
+            btnDel.style.display = 'block';
+        } else {
+            limpiarInv();
         }
     };
+
+    function limpiarInv() {
+        document.getElementById('edit-name').value = "";
+        document.getElementById('edit-price').value = "";
+        document.getElementById('edit-stock').value = "";
+        document.getElementById('btn-delete').style.display = 'none';
+        document.getElementById('sel-edit').value = "";
+    }
 
     window.reimprimirTicket = (index) => {
         const h = history[index];
@@ -206,19 +233,19 @@
     }
 
     function buildTicket(sub, disc, date, itemsArray) {
-        const line = "--------------------------------";
+        const line = "--------------------------";
         let itemsHtml = "";
         itemsArray.forEach(it => {
-            itemsHtml += `${it.qty.toString().padEnd(2)} ${it.name.substring(0,18).padEnd(19)} $${it.total.toFixed(2).padStart(7)}\n`;
+            itemsHtml += `${it.qty} ${it.name.substring(0,15)} $${it.total.toFixed(2)}\n`;
         });
-        document.getElementById('ticket-printable').innerText = `      DESECHABLES BASICOS\n        Pol. 23 Local 4\n${line}\nFECHA: ${date}\n${line}\n${itemsHtml}${line}\nTOTAL: $${(sub-disc).toFixed(2)}\n${line}\n     GRACIAS POR SU COMPRA`;
+        document.getElementById('ticket-printable').innerText = `    DESECHABLES BASICOS\n      Pol. 23 Local 4\n${line}\nFECHA: ${date}\n${line}\n${itemsHtml}${line}\nTOTAL: $${(sub-disc).toFixed(2)}\n${line}\n  GRACIAS POR SU COMPRA`;
     }
 
     function renderHistory() {
-        document.getElementById('history-container').innerHTML = history.map((h, i) => `
+        document.getElementById('history-container').innerHTML = history.slice(0,30).map((h, i) => `
             <div class="history-item">
                 <div><small>${h.date}</small><br><b>$${h.total.toFixed(2)}</b></div>
-                <button class="btn-reprint" onclick="window.reimprimirTicket(${i})">🖨️ Re-Ticket</button>
+                <button class="btn-reprint" onclick="window.reimprimirTicket(${i})">🖨️</button>
             </div>`).join('');
     }
 </script>
